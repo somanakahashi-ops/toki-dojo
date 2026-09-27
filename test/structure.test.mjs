@@ -28,17 +28,24 @@ test("自前のコードに鍵・非公開 API・危険な描画が無い", () =
   }
 });
 
-test("接続先は GMO の公開配信だけ", () => {
-  for (const p of own.filter((x) => x.endsWith(".js"))) {
+test("接続先は GMO の公開配信と中継だけ。HTTP で取りに行くのは history.js だけ", async () => {
+  const { RELAY_URL, WS_URL } = await import("../js/config.js");
+  const allowed = [WS_URL, RELAY_URL].filter(Boolean);
+  for (const p of own.filter((x) => x.endsWith(".js") && !x.includes("/relay/"))) {
     const s = readFileSync(p, "utf8");
-    assert.ok(!/\bfetch\(|XMLHttpRequest|sendBeacon|EventSource/.test(s), `${p} が通信している`);
-    for (const m of s.matchAll(/(?:wss?|https?):\/\/[^\s"'`)]+/g)) {
-      assert.equal(m[0], "wss://api.coin.z.com/ws/public/v1", `${p} に ${m[0]}`);
-    }
+    assert.ok(!/XMLHttpRequest|sendBeacon|EventSource|importScripts/.test(s), `${p} が通信している`);
+    if (!p.endsWith("/js/history.js")) assert.ok(!/\bfetch\b/.test(s), `${p} が fetch している`);
+    for (const m of s.matchAll(/(?:wss?|https?):\/\/[^\s"'`)]+/g)) assert.ok(allowed.includes(m[0]), `${p} に ${m[0]}`);
   }
 });
 
-test("index.html に CSP があり、外部のスクリプトを読まず、同梱のチャートに SRI が合う", () => {
+test("中継は GMO の過去の足だけに取り次ぎ、読める元は Pages だけ", () => {
+  const s = readFileSync(join(ROOT, "relay/worker.js"), "utf8");
+  const urls = [...s.matchAll(/https?:\/\/[^\s"'`)]+/g)].map((m) => m[0]);
+  assert.deepEqual([...new Set(urls)].sort(), ["https://api.coin.z.com/public/v1/klines", "https://somanakahashi-ops.github.io"]);
+});
+
+test("index.html に CSP があり、外部のスクリプトを読まず、同梱のチャートに SRI が合う", async () => {
   const html = readFileSync(join(ROOT, "index.html"), "utf8");
   const csp = html.match(/http-equiv="Content-Security-Policy" content="([^"]+)"/);
   assert.ok(csp, "CSP の meta が無い");
@@ -46,6 +53,10 @@ test("index.html に CSP があり、外部のスクリプトを読まず、同�
     assert.ok(csp[1].includes(d), `CSP に ${d} が無い`);
   }
   assert.ok(!/unsafe-inline|unsafe-eval/.test(csp[1]));
+  // connect-src は配信と中継の origin だけ
+  const { RELAY_URL } = await import("../js/config.js");
+  const connect = csp[1].match(/connect-src ([^;]+)/)[1].trim().split(/\s+/);
+  assert.deepEqual(connect, ["wss://api.coin.z.com", ...(RELAY_URL ? [new URL(RELAY_URL).origin] : [])]);
   assert.ok(!/<script[^>]+src="https?:/.test(html), "外部のスクリプトがある");
   assert.ok(!/<script>(?!\s*<\/script>)/.test(html), "インラインのスクリプトがある");
   const sri = html.match(/src="(vendor\/[^"]+)" integrity="sha256-([^"]+)"/);

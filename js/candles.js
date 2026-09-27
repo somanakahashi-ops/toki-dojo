@@ -7,6 +7,7 @@ export class Candles {
     this.bars = new Map(); // inst -> Map(t -> candle)
     this.quotes = new Map(); // inst -> Map(t -> {inst,t,bid,ask})
     this.live = new Map(); // inst -> 進行中の分 {candle, quote}
+    this.hist = new Map(); // `${inst}|${frame}` -> 過去の足（中継から。見るためだけ）
   }
 
   load(candles, quotes) {
@@ -63,8 +64,25 @@ export class Candles {
     }
   }
 
-  // frame 分の足に束ねる。欠けた分は作らない（チャートでは空白）
+  seed(inst, frame, bars) {
+    this.hist.set(`${inst}|${frame}`, bars);
+  }
+
+  // 過去の足と配信の足を重ねる（04 R-25）。同じ時刻は 始値＝過去・高安＝広い方・終値＝配信
   series(inst, frame) {
+    const live = this.liveSeries(inst, frame);
+    const hist = this.hist.get(`${inst}|${frame}`);
+    if (!hist || !hist.length) return live;
+    const byT = new Map(hist.map((b) => [b.t, { ...b, inst }]));
+    for (const k of live) {
+      const h = byT.get(k.t);
+      byT.set(k.t, h ? { inst, t: k.t, o: h.o, h: Math.max(h.h, k.h), l: Math.min(h.l, k.l), c: k.c, v: Math.max(h.v, k.v) } : k);
+    }
+    return [...byT.values()].sort((a, b) => a.t - b.t);
+  }
+
+  // frame 分の足に束ねる。欠けた分は作らない（チャートでは空白）
+  liveSeries(inst, frame) {
     const src = [...this.map(this.bars, inst).values()].sort((a, b) => a.t - b.t);
     if (frame === 1) return src;
     const out = [];

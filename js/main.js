@@ -7,6 +7,7 @@ import { Candles } from "./candles.js";
 import { Market } from "./market.js";
 import { Store } from "./store.js";
 import { Feed } from "./ws.js";
+import { History } from "./history.js";
 import { el } from "./ui/dom.js";
 import { Toasts } from "./ui/toast.js";
 import { Header } from "./ui/header.js";
@@ -60,6 +61,7 @@ class App {
     this.store = new Store();
     this.market = new Market();
     this.candles = new Candles(this.store);
+    this.history = new History();
     this.trades = [];
     this.dirty = false;
     this.renderQueued = false;
@@ -204,6 +206,7 @@ class App {
     }
     if (this.gapped) {
       this.gapped = false;
+      this.chart.refreshHistory(); // 値が戻ってから、空白のぶんの足を過去の足で埋める
       this.showBanner("");
     }
     this.render();

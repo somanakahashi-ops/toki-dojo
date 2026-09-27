@@ -61,6 +61,30 @@ export class ChartView {
     this.ma75 = this.chart.addLineSeries({ color: css("--muted"), lineWidth: 1, priceLineVisible: false, lastValueVisible: false });
   }
 
+  // 銘柄・足の長さが変わったら過去の足を取る（中継が無い・失敗したときは今まで通り）
+  loadHistory(inst) {
+    const hk = `${inst}|${this.frame}`;
+    if (!this.app.history.enabled || this.hk === hk) return;
+    this.hk = hk;
+    this.hist = "loading";
+    const frame = this.frame;
+    this.app.history.load(inst, frame).then((bars) => {
+      if (bars) this.app.candles.seed(inst, frame, bars);
+      if (this.hk === hk) this.hist = "ok";
+    }).catch(() => {
+      if (this.hk === hk) this.hist = "fail";
+    }).finally(() => {
+      if (this.hk === hk) this.reset();
+    });
+  }
+
+  // 空白から戻ったとき: 取り置きを捨てて、いま見ている足を取り直す
+  refreshHistory() {
+    this.app.history.clear();
+    this.hk = "";
+    this.reset();
+  }
+
   reset() {
     this.key = "";
     this.update();
@@ -75,6 +99,7 @@ export class ChartView {
       this.note.textContent = "チャートを読み込んでいます";
       return;
     }
+    this.loadHistory(inst);
     const bars = this.app.candles.series(inst, this.frame);
     const key = `${inst}|${this.frame}|${this.app.settings.ma}`;
     const data = bars.map((b) => ({ time: b.t / 1000 + JST, open: b.o, high: b.h, low: b.l, close: b.c }));
@@ -94,6 +119,8 @@ export class ChartView {
         this.count = data.length;
       }
     }
-    this.note.textContent = bars.length < 20 ? `開いてからの約定で足を作っています（${bars.length}本）。閉じていた時間は空白になります` : "";
+    this.note.textContent = this.hist === "loading" ? "過去の足を読み込んでいます"
+      : this.hist === "fail" && bars.length < 20 ? "過去の足を取れませんでした（開いてからの約定で作ります）"
+        : bars.length < 20 ? `開いてからの約定で足を作っています（${bars.length}本）。閉じていた時間は空白になります` : "";
   }
 }

@@ -4,14 +4,28 @@
 // （ブラウザが直接外へ出られない環境でも、中身は本物の配信で試せる）。
 import { chromium } from "playwright";
 import { readFileSync } from "node:fs";
+import { handle } from "../relay/worker.js";
 const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
 const TYPES = { html: "text/html", js: "text/javascript", css: "text/css", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
-async function serve(ctx) {
+// relay: "ok" なら中継（relay/worker.js をそのまま Node で動かし、本物の GMO を読む）をつなぐ。"down" なら中継が落ちている
+const RELAY = "https://relay.test";
+async function serve(ctx, relay = "ok") {
   await ctx.route("https://dojo.test/**", (route) => {
     let p = new URL(route.request().url()).pathname;
     if (p.endsWith("/")) p += "index.html";
-    try { route.fulfill({ status: 200, contentType: TYPES[p.split(".").pop()] || "application/octet-stream", body: readFileSync(ROOT + decodeURIComponent(p)) }); }
-    catch { route.fulfill({ status: 404, body: "" }); }
+    let body;
+    try { body = readFileSync(ROOT + decodeURIComponent(p), "utf8"); }
+    catch { return route.fulfill({ status: 404, body: "" }); }
+    if (p === "/js/config.js") body = body.replace('export const RELAY_URL = "";', `export const RELAY_URL = "${RELAY}";`);
+    if (p === "/index.html") body = body.replace("connect-src wss://api.coin.z.com;", `connect-src wss://api.coin.z.com ${RELAY};`);
+    return route.fulfill({ status: 200, contentType: TYPES[p.split(".").pop()] || "application/octet-stream", body });
+  });
+  await ctx.route(`${RELAY}/**`, async (route) => {
+    if (relay === "down") return route.fulfill({ status: 502, body: "upstream" });
+    const res = await handle(new Request(route.request().url()));
+    // 中継が許す元は Pages だけ。試験のページ（dojo.test）を Pages の代わりとして扱うため、ここでだけ差し替える
+    const headers = { ...Object.fromEntries(res.headers), "access-control-allow-origin": "https://dojo.test" };
+    route.fulfill({ status: res.status, headers, body: await res.text() });
   });
 }
 const OUT = process.argv[2] || ".";
@@ -49,6 +63,11 @@ await page.addInitScript(() => {
 await page.goto("https://dojo.test/");
 await page.waitForSelector(".book-row", { timeout: 40000 });
 console.log("board rows", await page.locator(".book-row").count(), "status", await page.locator(".pill").textContent());
+// 開いた直後から過去の足が出ている（知らせが消える＝20本以上）
+await page.waitForFunction(() => document.querySelector(".chart-note")?.textContent === "", null, { timeout: 20000 })
+  .catch(async (e) => { console.log("note:", await page.locator(".chart-note").textContent(), errors); throw e; });
+console.log("history: chart has >=20 bars right after opening");
+await page.screenshot({ path: `${OUT}/history.png` });
 await page.waitForFunction(() => !document.querySelector(".ticket .btn.buy, .ticket .btn.sell").disabled, null, { timeout: 20000 });
 await page.fill("#size", "0.0001");
 await page.waitForTimeout(400);
@@ -89,4 +108,11 @@ const p2 = await ctx.newPage();
 await p2.setContent('<iframe src="https://dojo.test/" width=400 height=300></iframe>');
 await p2.waitForTimeout(1500);
 console.log("framed text:", await p2.frames()[1].locator("#app").innerText());
+// 中継が落ちていても、今まで通り動く
+const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 } });
+await serve(ctx2, "down");
+const p3 = await ctx2.newPage();
+await p3.goto("https://dojo.test/");
+await p3.waitForFunction(() => /過去の足を取れませんでした/.test(document.querySelector(".chart-note")?.textContent || ""), null, { timeout: 15000 });
+console.log("relay down → fallback note:", await p3.locator(".chart-note").textContent());
 await browser.close();

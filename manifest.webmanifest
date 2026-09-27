@@ -1,0 +1,12 @@
+{
+  "name": "TOKI 道場",
+  "short_name": "TOKI 道場",
+  "description": "GMOコインのリアルタイムの値で仮想の売買を練習する",
+  "lang": "ja",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "background_color": "#121820",
+  "theme_color": "#121820",
+  "icons": [{ "src": "icon.svg", "sizes": "any", "type": "image/svg+xml" }]
+}

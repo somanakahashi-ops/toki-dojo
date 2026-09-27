@@ -1,0 +1,92 @@
+// 実際の配信で通しを確かめる（05 §8 Playwright）。npm test には入れない（外へつなぐため）。
+// 使い方: NODE_USE_ENV_PROXY=1 node test/smoke.e2e.mjs <スクリーンショットの置き場>
+// ページは https://dojo.test/ として手元のファイルを返し、WebSocket は Node から本物の GMO へ中継する
+// （ブラウザが直接外へ出られない環境でも、中身は本物の配信で試せる）。
+import { chromium } from "playwright";
+import { readFileSync } from "node:fs";
+const ROOT = new URL("..", import.meta.url).pathname.replace(/\/$/, "");
+const TYPES = { html: "text/html", js: "text/javascript", css: "text/css", svg: "image/svg+xml", webmanifest: "application/manifest+json" };
+async function serve(ctx) {
+  await ctx.route("https://dojo.test/**", (route) => {
+    let p = new URL(route.request().url()).pathname;
+    if (p.endsWith("/")) p += "index.html";
+    try { route.fulfill({ status: 200, contentType: TYPES[p.split(".").pop()] || "application/octet-stream", body: readFileSync(ROOT + decodeURIComponent(p)) }); }
+    catch { route.fulfill({ status: 404, body: "" }); }
+  });
+}
+const OUT = process.argv[2] || ".";
+const browser = await chromium.launch();
+const ctx = await browser.newContext({ viewport: { width: 390, height: 844 }, deviceScaleFactor: 2 });
+await serve(ctx);
+// 砂箱の Chromium は外へ出られないので、ページの WebSocket を Node 経由で本物の GMO へ中継する（中身は本物の配信）
+await ctx.routeWebSocket("wss://api.coin.z.com/ws/public/v1", (ws) => {
+  const up = new WebSocket("wss://api.coin.z.com/ws/public/v1");
+  const pending = [];
+  // 上流がつながる前に溜まったぶんも、1.1秒おきに流す（中継のせいで GMO の制限を超えないように）
+  let last = 0;
+  const flush = () => {
+    if (up.readyState !== 1 || !pending.length) return;
+    const wait = last + 1100 - Date.now();
+    if (wait > 0) return setTimeout(flush, wait);
+    last = Date.now();
+    up.send(pending.shift());
+    if (pending.length) setTimeout(flush, 1100);
+  };
+  up.onopen = flush;
+  up.onmessage = (e) => ws.send(String(e.data));
+  up.onclose = () => ws.close();
+  ws.onMessage((m) => { pending.push(m); flush(); });
+  ws.onClose(() => up.close());
+});
+const page = await ctx.newPage();
+const errors = [];
+page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
+page.on("pageerror", (e) => errors.push(String(e)));
+await page.addInitScript(() => {
+  window.__csp = [];
+  document.addEventListener("securitypolicyviolation", (e) => window.__csp.push(`${e.violatedDirective} ${e.blockedURI}`));
+});
+await page.goto("https://dojo.test/");
+await page.waitForSelector(".book-row", { timeout: 40000 });
+console.log("board rows", await page.locator(".book-row").count(), "status", await page.locator(".pill").textContent());
+await page.waitForFunction(() => !document.querySelector(".ticket .btn.buy, .ticket .btn.sell").disabled, null, { timeout: 20000 });
+await page.fill("#size", "0.0001");
+await page.waitForTimeout(400);
+console.log("est:", await page.locator(".est").innerText());
+await page.locator(".ticket button.btn.buy").click();
+await page.waitForSelector("text=BTC 現物", { timeout: 5000 });
+console.log("spot holding row ok");
+await page.screenshot({ path: `${OUT}/spot.png`, fullPage: true });
+await page.locator("button:has-text('全部売る')").click();
+await page.waitForTimeout(1500);
+// レバ: 新規買い → 決済
+await page.locator(".topbar button:has-text('レバ')").click();
+await page.waitForFunction(() => { const b = document.querySelector(".ticket .btn.buy"); return b && !b.disabled; }, null, { timeout: 20000 });
+await page.fill("#size", "0.001");
+await page.waitForTimeout(400);
+console.log("lev est:", await page.locator(".est").innerText());
+await page.locator(".ticket button.btn.buy").click();
+await page.waitForSelector("text=BTC_JPY 買い", { timeout: 5000 });
+console.log("lev pos ok; margin:", await page.locator(".acct").innerText());
+await page.locator("button:has-text('決済')").first().click();
+await page.waitForTimeout(1500);
+console.log("history:", (await page.locator("text=最近の注文").locator("xpath=following-sibling::*[1]").innerText()).replace(/\n/g, " | "));
+console.log("banner:", await page.locator(".banner").isVisible() ? await page.locator(".banner").textContent() : "(none)");
+await page.locator(".tabs button:has-text('振り返り')").click();
+await page.waitForTimeout(800);
+const n = await page.locator(".stat").first().innerText();
+console.log("review:", n.replace(/\n/g, " "));
+await page.screenshot({ path: `${OUT}/review.png`, fullPage: true });
+await page.locator(".tabs button:has-text('取引')").click();
+await page.waitForTimeout(3000);
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.waitForTimeout(300);
+await page.screenshot({ path: `${OUT}/trade.png` });
+console.log("csp violations:", JSON.stringify(await page.evaluate(() => window.__csp)));
+console.log("errors:", JSON.stringify(errors));
+// 埋め込みの確認
+const p2 = await ctx.newPage();
+await p2.setContent('<iframe src="https://dojo.test/" width=400 height=300></iframe>');
+await p2.waitForTimeout(1500);
+console.log("framed text:", await p2.frames()[1].locator("#app").innerText());
+await browser.close();

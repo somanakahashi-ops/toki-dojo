@@ -63,7 +63,7 @@ export const WS_URL = "wss://api.coin.z.com/ws/public/v1";
 
 // 過去の足の中継（Cloudflare Workers・relay/worker.js）。空なら過去の足を取らない（今まで通り）。
 // 変えたら index.html の CSP の connect-src にも同じ origin を入れる（構造のテストで確かめる）
-export const RELAY_URL = "";
+export const RELAY_URL = "https://toki-dojo-relay.soma-nakahashi.workers.dev";
 export const HISTORY_BARS = 120;
 export const HISTORY_MAX_ROWS = 1500;
 export const HISTORY_TIMEOUT_MS = 8000;

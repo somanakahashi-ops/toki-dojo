@@ -16,8 +16,9 @@ async function serve(ctx, relay = "ok") {
     let body;
     try { body = readFileSync(ROOT + decodeURIComponent(p), "utf8"); }
     catch { return route.fulfill({ status: 404, body: "" }); }
-    if (p === "/js/config.js") body = body.replace('export const RELAY_URL = "";', `export const RELAY_URL = "${RELAY}";`);
-    if (p === "/index.html") body = body.replace("connect-src wss://api.coin.z.com;", `connect-src wss://api.coin.z.com ${RELAY};`);
+    // 設定されている中継（本番の URL か空）を、試験の中継に差し替える
+    if (p === "/js/config.js") body = body.replace(/export const RELAY_URL = "[^"]*";/, `export const RELAY_URL = "${RELAY}";`);
+    if (p === "/index.html") body = body.replace(/connect-src wss:\/\/api\.coin\.z\.com[^;]*;/, `connect-src wss://api.coin.z.com ${RELAY};`);
     return route.fulfill({ status: 200, contentType: TYPES[p.split(".").pop()] || "application/octet-stream", body });
   });
   await ctx.route(`${RELAY}/**`, async (route) => {

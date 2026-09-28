@@ -78,6 +78,23 @@ for (const [label, shot] of [["Tick", "tick"], ["10T", "t10"]]) {
   await page.screenshot({ path: `${OUT}/${shot}.png` });
 }
 await page.locator('.chip:text-is("1分")').click();
+// 縦軸を引いて自動の幅合わせを切ってから銘柄を変えても、新しい銘柄の幅に合う（04 R-33）
+{
+  const box = await page.locator(".chart-box").boundingBox();
+  const x = box.x + box.width - 30;
+  await page.mouse.move(x, box.y + 80);
+  await page.mouse.down();
+  await page.mouse.move(x, box.y + 260, { steps: 8 });
+  await page.mouse.up();
+  await page.screenshot({ path: `${OUT}/axis-dragged.png` });
+  await page.selectOption("#sym", "XRP");
+  await page.waitForFunction(() => document.querySelector(".chart-note")?.textContent === "", null, { timeout: 30000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+  await page.screenshot({ path: `${OUT}/axis-xrp.png` });
+  console.log("axis: switched to XRP after dragging the price axis");
+  await page.selectOption("#sym", "BTC");
+  await page.waitForTimeout(1500);
+}
 await page.waitForFunction(() => !document.querySelector(".ticket .btn.buy, .ticket .btn.sell").disabled, null, { timeout: 20000 });
 await page.fill("#size", "0.0001");
 await page.waitForTimeout(400);

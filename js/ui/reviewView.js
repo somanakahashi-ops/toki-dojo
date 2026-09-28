@@ -5,6 +5,11 @@ import { clear, el, pct, px, qty, signClass, yen } from "./dom.js";
 
 const REASONS = { 手動: "手動", 損切り: "損切り", 利確: "利確", 強制決済: "強制決済", 逆指値: "逆指値", 指値: "指値" };
 
+// 値幅の損益（手数料・建玉管理料を引く前）。損益 ＝ 値幅 − 手数料 − 建玉管理料（04 R-34）
+function gross(t) {
+  return (t.side === "BUY" ? 1 : -1) * (t.exitPrice - t.entryPrice) * t.size;
+}
+
 function holdText(ms) {
   const m = Math.max(0, Math.round(ms / 60000));
   return m < 60 ? `${m}分` : `${Math.floor(m / 60)}時間${m % 60}分`;
@@ -69,6 +74,9 @@ export class ReviewView {
         stat("手数料の合計", yen(st.fees)),
         stat("建玉管理料の合計", yen(st.carry)),
       ]),
+      el("p", { class: "muted", text: st.n
+        ? `内訳: 値幅の損益 ${yen(trades.reduce((a, t) => a + gross(t), 0), { sign: true })} − 手数料 ${yen(st.fees)} − 建玉管理料 ${yen(st.carry)} ＝ 合計損益 ${yen(st.total, { sign: true })}（円未満は四捨五入。現物の手数料は買いと売りの両方。レバの手数料は GMO と同じく0円で、コストはスプレッドと建玉管理料）`
+        : "" }),
     ]));
 
     const c = this.compare();
@@ -122,6 +130,9 @@ export class ReviewView {
         el("td", { class: "r num", text: `${px(t.inst, t.entryPrice)} → ${px(t.inst, t.exitPrice)}` }),
         el("td", { class: "r num", text: holdText(t.exitTime - t.entryTime) }),
         el("td", { class: `r num ${signClass(t.pnl)}`, text: yen(t.pnl, { sign: true }) }),
+        el("td", { class: "r num muted", text: yen(gross(t), { sign: true }) }),
+        el("td", { class: "r num muted", text: yen(t.fees) }),
+        el("td", { class: "r num muted", text: t.market === "lev" ? yen(t.carry) : "—" }),
         el("td", { text: REASONS[t.exitReason] || t.exitReason }),
         el("td", {}, [memo]),
       ]);
@@ -129,7 +140,7 @@ export class ReviewView {
     const list = el("section", { class: "card", attrs: { "aria-label": "取引の一覧" } }, [el("h2", { text: `取引の一覧（新しい順・最大200件を表示）` })]);
     if (rows.length) {
       list.append(el("div", { class: "table-wrap" }, [el("table", {}, [
-        el("thead", {}, [el("tr", {}, [["銘柄"], ["数量", 1], ["建値→決済値", 1], ["保有", 1], ["損益", 1], ["理由"], ["メモ"]]
+        el("thead", {}, [el("tr", {}, [["銘柄"], ["数量", 1], ["建値→決済値", 1], ["保有", 1], ["損益", 1], ["値幅", 1], ["手数料", 1], ["管理料", 1], ["理由"], ["メモ"]]
           .map(([t, r]) => el("th", { class: r ? "r" : "", text: t })))]),
         el("tbody", {}, rows),
       ])]));

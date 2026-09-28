@@ -181,3 +181,88 @@ test("全部を決済した注文は「約定」で残り、付いていた損�
   trade("XRP_JPY", 230.5);
   assert.equal(acc.s.history.find((h) => /@230/.test(h.label)).status, "filled");
 });
+
+// 手数料と現金の突き合わせ（04 R-34）: 建玉・保有が無くなった時点で
+//   現金の増減 ＝ 取引の損益の合計、約定ごとの手数料の合計 ＝ 取引の手数料の合計
+function audit(name, steps) {
+  test(`手数料と現金が合う: ${name}`, () => {
+    const env = setup({ cash: 100000 });
+    const fills = [];
+    const onEvent = env.acc.onEvent;
+    env.acc.onEvent = (e) => { if (e.fill) fills.push(e.fill); onEvent(e); };
+    steps(env);
+    assert.equal(env.acc.s.lev.length, 0);
+    for (const h of Object.values(env.acc.s.spot)) assert.equal(h.qty, 0);
+    const pnl = env.trades.reduce((a, t) => a + t.pnl, 0);
+    assert.ok(Math.abs(env.acc.s.cash - 100000 - pnl) < 1e-6, `現金 ${env.acc.s.cash - 100000} と損益 ${pnl}`);
+    const feeFills = fills.reduce((a, f) => a + f.fee, 0);
+    const feeTrades = env.trades.reduce((a, t) => a + t.fees, 0);
+    assert.ok(Math.abs(feeFills - feeTrades) < 1e-6, `約定の手数料 ${feeFills} と取引の手数料 ${feeTrades}`);
+    // 損益 ＝ 値幅の損益 − 手数料 − 建玉管理料（画面の内訳と同じ式）
+    for (const t of env.trades) {
+      const gross = (t.side === "BUY" ? 1 : -1) * (t.exitPrice - t.entryPrice) * t.size;
+      assert.ok(Math.abs(gross - t.fees - t.carry - t.pnl) < 1e-6, `${t.inst}: ${gross} − ${t.fees} − ${t.carry} ≠ ${t.pnl}`);
+    }
+  });
+}
+
+audit("現物の成行の往復", ({ acc, book }) => {
+  book("BTC", 13000000, 13000100);
+  acc.place({ inst: "BTC", side: "BUY", type: "MARKET", size: 0.0001 });
+  acc.step();
+  book("BTC", 13010000, 13010100);
+  acc.place({ inst: "BTC", side: "SELL", type: "MARKET", size: 0.0001 });
+  acc.step();
+});
+
+audit("現物を2回買って2回売る（平均取得が動く）", ({ acc, book }) => {
+  book("BTC", 13000000, 13000100);
+  acc.place({ inst: "BTC", side: "BUY", type: "MARKET", size: 0.0001 });
+  acc.step();
+  book("BTC", 13100000, 13100100);
+  acc.place({ inst: "BTC", side: "BUY", type: "MARKET", size: 0.0002 });
+  acc.step();
+  acc.place({ inst: "BTC", side: "SELL", type: "MARKET", size: 0.00015 });
+  acc.step();
+  acc.place({ inst: "BTC", side: "SELL", type: "MARKET", size: 0.00015 });
+  acc.step();
+});
+
+audit("現物の指値（Maker のリベート）", ({ acc, book, trade }) => {
+  book("SOL", 30000, 30010);
+  acc.place({ inst: "SOL", side: "BUY", type: "LIMIT", size: 0.5, price: 29990 });
+  acc.step();
+  trade("SOL", 29980);
+  book("SOL", 30100, 30110);
+  acc.place({ inst: "SOL", side: "SELL", type: "LIMIT", size: 0.5, price: 30200 });
+  acc.step();
+  trade("SOL", 30210);
+});
+
+audit("レバの往復で UTC 20時をまたぐ（建玉管理料）", ({ acc, book, advance }) => {
+  book("BTC_JPY", 13000000, 13000500);
+  acc.place({ inst: "BTC_JPY", side: "BUY", type: "MARKET", size: 0.001, intent: "open" });
+  acc.step();
+  advance(12 * 3600000);
+  book("BTC_JPY", 13050000, 13050500);
+  acc.step();
+  acc.place({ inst: "BTC_JPY", side: "SELL", type: "MARKET", size: 0.001, intent: "close", positionId: acc.s.lev[0].id });
+  acc.step();
+});
+
+audit("レバの売りを一部ずつ決済（手数料のある SOL_JPY）", ({ acc, book, advance }) => {
+  book("SOL_JPY", 30000, 30020, 50);
+  acc.place({ inst: "SOL_JPY", side: "SELL", type: "MARKET", size: 1, intent: "open" });
+  acc.step();
+  const id = acc.s.lev[0].id;
+  advance(11 * 3600000);
+  book("SOL_JPY", 29000, 29020, 50);
+  acc.step();
+  acc.place({ inst: "SOL_JPY", side: "BUY", type: "MARKET", size: 0.3, intent: "close", positionId: id });
+  acc.step();
+  advance(24 * 3600000);
+  book("SOL_JPY", 29500, 29520, 50);
+  acc.step();
+  acc.place({ inst: "SOL_JPY", side: "BUY", type: "MARKET", size: 0.7, intent: "close", positionId: id });
+  acc.step();
+});

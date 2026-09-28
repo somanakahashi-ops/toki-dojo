@@ -164,7 +164,11 @@ export class ChartView {
       (lineMode ? this.candle : this.line).setData([]);
       main.setData(bars.map(point));
       ma();
+      // 銘柄・足の長さを変えたら、縦軸は自動に戻し、横の拡大も戻す（04 R-33。
+      // 縦軸をつまむ・引くと自動が切れ、前の銘柄の値段の幅のまま残るため）
+      this.chart.priceScale("right").applyOptions({ autoScale: true });
       this.chart.timeScale().applyOptions({ secondsVisible: isTick(this.frame) });
+      this.chart.timeScale().resetTimeScale();
       this.chart.timeScale().scrollToRealTime();
       this.key = key;
       this.lastTime = lastTime;

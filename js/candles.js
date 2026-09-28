@@ -115,7 +115,9 @@ export class Candles {
   // いちばん新しい約定の値段（配信の最初の約定が来るまで、上の帯に出すため）
   lastPrice(inst) {
     const arr = this.ticks.get(inst);
-    return arr && arr.length ? arr[arr.length - 1].price : null;
+    if (arr && arr.length) return arr[arr.length - 1].price;
+    const bars = this.series(inst, 1);
+    return bars.length ? bars[bars.length - 1].c : null;
   }
 
   seed(inst, frame, bars) {

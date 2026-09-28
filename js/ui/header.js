@@ -42,7 +42,7 @@ export class Header {
     this.conn.textContent = st;
     this.conn.className = `pill ${st === "つながっている" ? "ok" : st === "切断中" ? "bad" : "warn"}`;
     const s = app.market.get(inst);
-    this.price.textContent = px(inst, s.last);
+    this.price.textContent = px(inst, s.last ?? app.candles.lastPrice(inst));
     const bid = app.market.bestBid(inst);
     const ask = app.market.bestAsk(inst);
     if (bid !== null && ask !== null) {

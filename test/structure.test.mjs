@@ -39,10 +39,10 @@ test("接続先は GMO の公開配信と中継だけ。HTTP で取りに行く�
   }
 });
 
-test("中継は GMO の過去の足だけに取り次ぎ、読める元は Pages だけ", () => {
+test("中継は GMO の過去の足と最近の約定だけに取り次ぎ、読める元は Pages だけ", () => {
   const s = readFileSync(join(ROOT, "relay/worker.js"), "utf8");
   const urls = [...s.matchAll(/https?:\/\/[^\s"'`)]+/g)].map((m) => m[0]);
-  assert.deepEqual([...new Set(urls)].sort(), ["https://api.coin.z.com/public/v1/klines", "https://somanakahashi-ops.github.io"]);
+  assert.deepEqual([...new Set(urls)].sort(), ["https://api.coin.z.com/public/v1/klines", "https://api.coin.z.com/public/v1/trades", "https://somanakahashi-ops.github.io"]);
 });
 
 test("index.html に CSP があり、外部のスクリプトを読まず、同梱のチャートに SRI が合う", async () => {

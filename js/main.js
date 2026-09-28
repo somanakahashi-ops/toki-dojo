@@ -11,7 +11,7 @@ import { History } from "./history.js";
 import { el } from "./ui/dom.js";
 import { Toasts } from "./ui/toast.js";
 import { Header } from "./ui/header.js";
-import { ChartView } from "./ui/chart.js";
+import { ChartView, FRAME_KEYS } from "./ui/chart.js";
 import { BookView } from "./ui/book.js";
 import { Ticket } from "./ui/ticket.js";
 import { PositionsView } from "./ui/positions.js";
@@ -39,6 +39,7 @@ function cleanSettings(raw) {
     levels: [10, 20].includes(s.levels) ? s.levels : 10,
     ma: s.ma !== false,
     confirm: s.confirm === true,
+    frame: FRAME_KEYS.includes(s.frame) ? s.frame : 1,
   };
 }
 
@@ -198,7 +199,7 @@ class App {
     }
     this.market.update(m);
     if (m.kind === "trade") {
-      this.candles.onTrade(m.symbol, m.price, m.size, m.t);
+      this.candles.onTrade(m.symbol, m.price, m.size, m.t, m.side);
       this.account.onTrade(m.symbol, m.price);
     } else if (m.kind === "book") {
       this.candles.onBook(m.symbol, this.market.bestBid(m.symbol), this.market.bestAsk(m.symbol), m.t);

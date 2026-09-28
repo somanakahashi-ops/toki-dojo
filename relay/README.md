@@ -19,4 +19,6 @@ GMO の過去の足（公開データ）は、ブラウザから直接は読め�
 確かめ方: ブラウザで `https://toki-dojo-relay.<あなたの名前>.workers.dev/klines?symbol=BTC&interval=1hour&date=<今日の日付 例 20260928>` を開き、
 `{"status":0,"data":[...]}` が出れば動いています（日付は日本時間の朝6時で変わります）。
 
-`worker.js` を変えたら、同じ手順4で貼り直してください。
+`worker.js` を変えたら、同じ手順4で貼り直してください（Workers & Pages → `toki-dojo-relay` → Edit code → 全部消して貼る → Deploy）。
+
+- 2026-09-28: 最近の約定（`/trades`・ティック足用）を足した。貼り直すまではティック足の過去の約定が出ない（開いてからの約定で作る）

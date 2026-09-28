@@ -1,5 +1,11 @@
 // 約定から1分足、板から1分ごとの最良気配を作る（05 §6）。購読中の全銘柄について作る（04 R-1）。
+import { TICK_KEEP } from "./config.js";
+
 const MIN = 60000;
+
+function tradeKey(k) {
+  return `${k.t}|${k.price}|${k.size}|${k.side}`;
+}
 
 export class Candles {
   constructor(store) {
@@ -8,6 +14,8 @@ export class Candles {
     this.quotes = new Map(); // inst -> Map(t -> {inst,t,bid,ask})
     this.live = new Map(); // inst -> 進行中の分 {candle, quote}
     this.hist = new Map(); // `${inst}|${frame}` -> 過去の足（中継から。見るためだけ）
+    this.ticks = new Map(); // inst -> [{seq, t, price, size, side}]（記憶だけ・最大 TICK_KEEP）
+    this.nextSeq = new Map();
   }
 
   load(candles, quotes) {
@@ -25,7 +33,8 @@ export class Candles {
     return this.live.get(inst);
   }
 
-  onTrade(inst, price, size, t) {
+  onTrade(inst, price, size, t, side = "BUY") {
+    this.addTick(inst, { t, price, size, side });
     const m = Math.floor(t / MIN) * MIN;
     const c = this.cur(inst);
     if (c.candle && c.candle.t !== m) this.close(inst);
@@ -62,6 +71,51 @@ export class Candles {
       if (c.candle) this.store?.add("candles", c.candle);
       if (c.quote) this.store?.add("quotes", c.quote);
     }
+  }
+
+  addTick(inst, k) {
+    const arr = this.ticks.get(inst) || [];
+    const seq = this.nextSeq.get(inst) || 0;
+    arr.push({ seq, ...k });
+    this.nextSeq.set(inst, seq + 1);
+    if (arr.length > TICK_KEEP) arr.splice(0, arr.length - TICK_KEEP); // 番号はそのまま（04 R-31）
+    this.ticks.set(inst, arr);
+  }
+
+  // 過去の約定（古い順）＋それ以降の配信の約定で作り直し、番号を振り直す（04 R-30）
+  seedTicks(inst, list) {
+    const seen = new Set(list.map(tradeKey));
+    const last = list.length ? list[list.length - 1].t : -Infinity;
+    const live = (this.ticks.get(inst) || []).filter((k) => k.t >= last && !seen.has(tradeKey(k)));
+    const all = [...list, ...live].slice(-TICK_KEEP).map((k, seq) => ({ seq, t: k.t, price: k.price, size: k.size, side: k.side }));
+    this.ticks.set(inst, all);
+    this.nextSeq.set(inst, all.length);
+  }
+
+  // n=1 は約定ごとの点（線）。n>1 は floor(seq/n) で束ねたローソク足。x は横軸の番号
+  tickSeries(inst, n) {
+    const arr = this.ticks.get(inst) || [];
+    if (n === 1) return arr.map((k) => ({ x: k.seq, t: k.t, o: k.price, h: k.price, l: k.price, c: k.price, v: k.size }));
+    const out = [];
+    let cur = null;
+    for (const k of arr) {
+      const g = Math.floor(k.seq / n);
+      if (!cur || cur.x !== g) {
+        cur = { x: g, t: k.t, o: k.price, h: k.price, l: k.price, c: k.price, v: 0 };
+        out.push(cur);
+      }
+      cur.h = Math.max(cur.h, k.price);
+      cur.l = Math.min(cur.l, k.price);
+      cur.c = k.price;
+      cur.v += k.size;
+    }
+    return out;
+  }
+
+  // いちばん新しい約定の値段（配信の最初の約定が来るまで、上の帯に出すため）
+  lastPrice(inst) {
+    const arr = this.ticks.get(inst);
+    return arr && arr.length ? arr[arr.length - 1].price : null;
   }
 
   seed(inst, frame, bars) {

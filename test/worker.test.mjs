@@ -59,3 +59,17 @@ test("取り次ぎ先の失敗は中身を出さずに 502", async () => {
   });
   assert.equal(thrown.status, 502);
 });
+
+test("/trades は page 1〜10・count=100 だけを取り次ぐ（04 R-27）", async () => {
+  const ok = await run("/trades?symbol=XRP_JPY&page=10&count=100");
+  assert.equal(ok.res.status, 200);
+  assert.equal(ok.calls[0].url, "https://api.coin.z.com/public/v1/trades?symbol=XRP_JPY&page=10&count=100");
+  assert.equal(ok.calls[0].init.cf.cacheTtl, 5);
+  for (const p of ["/trades?symbol=BTC&page=0&count=100", "/trades?symbol=BTC&page=11&count=100", "/trades?symbol=BTC&page=01&count=100",
+    "/trades?symbol=BTC&page=1&count=50", "/trades?symbol=BTC&page=1", "/trades?symbol=FOO&page=1&count=100",
+    "/trades?symbol=BTC&page=1&count=100&x=1", "/trades/x?symbol=BTC&page=1&count=100"]) {
+    const { res, calls } = await run(p);
+    assert.ok(res.status === 400 || res.status === 404, `${p} → ${res.status}`);
+    assert.equal(calls.length, 0, p);
+  }
+});

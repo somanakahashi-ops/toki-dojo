@@ -68,4 +68,9 @@ export const HISTORY_BARS = 120;
 export const HISTORY_MAX_ROWS = 1500;
 export const HISTORY_TIMEOUT_MS = 8000;
 export const HISTORY_CACHE_MS = 60000;
+// ティック足（05 §7.2）
+export const TICK_HISTORY_PAGES = 10;
+export const TICK_HISTORY_MAX = 1000;
+export const TICK_CACHE_MS = 30000;
+export const TICK_KEEP = 5000;
 export const DB_NAME = "toki-dojo-v1";

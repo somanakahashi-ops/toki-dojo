@@ -69,6 +69,15 @@ await page.waitForFunction(() => document.querySelector(".chart-note")?.textCont
   .catch(async (e) => { console.log("note:", await page.locator(".chart-note").textContent(), errors); throw e; });
 console.log("history: chart has >=20 bars right after opening");
 await page.screenshot({ path: `${OUT}/history.png` });
+// ティック足: Tick（線）と 10T（ローソク足）で、開いた直後から過去の約定が出る
+for (const [label, shot] of [["Tick", "tick"], ["10T", "t10"]]) {
+  await page.locator(`.chip:text-is("${label}")`).click();
+  await page.waitForFunction(() => document.querySelector(".chart-note")?.textContent === "", null, { timeout: 30000 })
+    .catch(async (e) => { console.log("note:", await page.locator(".chart-note").textContent(), errors); throw e; });
+  console.log(`ticks: ${label} has >=20 points right after switching`);
+  await page.screenshot({ path: `${OUT}/${shot}.png` });
+}
+await page.locator('.chip:text-is("1分")').click();
 await page.waitForFunction(() => !document.querySelector(".ticket .btn.buy, .ticket .btn.sell").disabled, null, { timeout: 20000 });
 await page.fill("#size", "0.0001");
 await page.waitForTimeout(400);

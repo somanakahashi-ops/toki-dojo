@@ -2,6 +2,7 @@
 // ★見るためだけ。約定の判定には使わない（04 R-18）。端末には保存せず、記憶に少しだけ置く。
 import {
   HISTORY_BARS, HISTORY_CACHE_MS, HISTORY_MAX_ROWS, HISTORY_TIMEOUT_MS, RELAY_URL, SPECS,
+  TICK_HISTORY_MAX, TICK_HISTORY_PAGES, TICK_CACHE_MS,
 } from "./config.js";
 
 const DAY = 86400000;
@@ -42,6 +43,28 @@ export function parseKlines(json, frameMin) {
   return out;
 }
 
+// 最近の約定（05 §7.2）。status が 0 以外は空、1行でも外れたら全体を捨てる（null）
+export function parseTrades(json) {
+  if (!json || typeof json !== "object") return null;
+  if (json.status !== 0) return [];
+  const list = json.data && json.data.list;
+  if (!Array.isArray(list) || list.length > 100) return null;
+  const out = [];
+  for (const r of list) {
+    if (!r || typeof r !== "object") return null;
+    const t = Date.parse(r.timestamp);
+    const price = num(r.price);
+    const size = num(r.size);
+    if (!Number.isFinite(t) || !(price > 0) || size === null || size < 0 || (r.side !== "BUY" && r.side !== "SELL")) return null;
+    out.push({ t, price, size, side: r.side });
+  }
+  return out;
+}
+
+export function tradeKey(k) {
+  return `${k.t}|${k.price}|${k.size}|${k.side}`;
+}
+
 export class History {
   constructor({ relay = RELAY_URL, fetchImpl = globalThis.fetch?.bind(globalThis), now = () => Date.now() } = {}) {
     this.relay = relay;
@@ -58,37 +81,58 @@ export class History {
     this.cache.clear();
   }
 
-  async day(inst, frame, date) {
+  async get(path, parse) {
     const ctl = typeof AbortController === "function" ? new AbortController() : null;
     const timer = ctl ? setTimeout(() => ctl.abort(), HISTORY_TIMEOUT_MS) : null;
     try {
-      const url = `${this.relay}/klines?symbol=${encodeURIComponent(inst)}&interval=${INTERVAL[frame]}&date=${date}`;
-      const res = await this.fetch(url, { signal: ctl?.signal, credentials: "omit", referrerPolicy: "no-referrer" });
+      const res = await this.fetch(`${this.relay}${path}`, { signal: ctl?.signal, credentials: "omit", referrerPolicy: "no-referrer" });
       if (!res.ok) throw new Error(`relay ${res.status}`);
-      const rows = parseKlines(await res.json(), frame);
-      if (rows === null) throw new Error("bad klines");
+      const rows = parse(await res.json());
+      if (rows === null) throw new Error("bad data");
       return rows;
     } finally {
       if (timer) clearTimeout(timer);
     }
   }
 
+  day(inst, frame, date) {
+    return this.get(`/klines?symbol=${encodeURIComponent(inst)}&interval=${INTERVAL[frame]}&date=${date}`, (j) => parseKlines(j, frame));
+  }
+
+  // 最近の約定を新しい方から1ページ100件ずつ取り、古い順に返す。
+  // ページの間に新しい約定が入ると古い側へずれるので、重複は出るが抜けは出ない → 重複を除く（04 R-28）
+  trades(inst) {
+    if (!this.enabled || !SPECS[inst]) return Promise.resolve(null);
+    return this.cached(`${inst}|ticks`, TICK_CACHE_MS, async () => {
+      const byKey = new Map();
+      for (let page = 1; page <= TICK_HISTORY_PAGES && byKey.size < TICK_HISTORY_MAX; page += 1) {
+        const rows = await this.get(`/trades?symbol=${encodeURIComponent(inst)}&page=${page}&count=100`, parseTrades);
+        for (const k of rows) byKey.set(tradeKey(k), k);
+        if (rows.length < 100) break;
+      }
+      return [...byKey.values()].sort((a, b) => a.t - b.t);
+    });
+  }
+
+  cached(key, ms, make) {
+    const hit = this.cache.get(key);
+    if (hit && this.now() - hit.at < ms) return hit.promise;
+    const promise = make();
+    this.cache.set(key, { at: this.now(), promise });
+    promise.catch(() => this.cache.delete(key)); // 失敗は取り置かない（次の切り替えで取り直す）
+    return promise;
+  }
+
   // 今日から1日ずつ遡り、HISTORY_BARS 本そろうか上限の日数に届くまで取る。失敗は投げる（呼ぶ側が今まで通りに戻す）
   load(inst, frame) {
     if (!this.enabled || !SPECS[inst] || !INTERVAL[frame]) return Promise.resolve(null);
-    const key = `${inst}|${frame}`;
-    const hit = this.cache.get(key);
-    if (hit && this.now() - hit.at < HISTORY_CACHE_MS) return hit.promise;
-    const promise = (async () => {
+    return this.cached(`${inst}|${frame}`, HISTORY_CACHE_MS, async () => {
       const byT = new Map();
       const now = this.now();
       for (let d = 0; d < MAX_DAYS[frame] && byT.size < HISTORY_BARS; d += 1) {
         for (const b of await this.day(inst, frame, gmoDate(now - d * DAY))) byT.set(b.t, b);
       }
       return [...byT.values()].sort((a, b) => a.t - b.t);
-    })();
-    this.cache.set(key, { at: this.now(), promise });
-    promise.catch(() => this.cache.delete(key)); // 失敗は取り置かない（次の切り替えで取り直す）
-    return promise;
+    });
   }
 }

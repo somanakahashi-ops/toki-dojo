@@ -1,9 +1,10 @@
-// TOKI 道場の中継（Cloudflare Workers）。GMO の公開の過去の足を読むことだけを取り次ぐ（05 §7.1）。
+// TOKI 道場の中継（Cloudflare Workers）。GMO の公開の過去の足と最近の約定を読むことだけを取り次ぐ（05 §7.1・7.2）。
 // ★鍵を持たない・書き込まない・決まった組み合わせ以外は断る（何でも取り次ぐ中継にしない。04 R-22）。
 // Cloudflare の管理画面にこのファイルをそのまま貼って公開する（relay/README.md）。
 
 const ORIGIN = "https://somanakahashi-ops.github.io";
 const UPSTREAM = "https://api.coin.z.com/public/v1/klines";
+const UPSTREAM_TRADES = "https://api.coin.z.com/public/v1/trades";
 // js/config.js の SPECS と同じ15銘柄（テストで一致を確かめる）
 export const SYMBOLS = Object.freeze([
   "BTC", "ETH", "XRP", "SOL", "DOGE", "XLM", "ADA", "BCH",
@@ -33,26 +34,10 @@ function reply(status, text) {
   return new Response(text, { status, headers: headers({ "Content-Type": "text/plain; charset=utf-8" }) });
 }
 
-export async function handle(request, { now = Date.now(), fetchImpl = fetch } = {}) {
-  if (request.method === "OPTIONS") {
-    return new Response(null, { status: 204, headers: headers({ "Access-Control-Allow-Methods": "GET", "Access-Control-Max-Age": "86400" }) });
-  }
-  if (request.method !== "GET") return reply(405, "method");
-  const url = new URL(request.url);
-  if (url.pathname !== "/klines") return reply(404, "not found");
-  const q = url.searchParams;
-  const symbol = q.get("symbol");
-  const interval = q.get("interval");
-  const date = q.get("date");
-  if ([...q.keys()].length !== 3 || !SYMBOLS.includes(symbol) || !INTERVALS.includes(interval)
-    || !/^\d{8}$/.test(date || "") || date < gmoDate(now - 7 * DAY) || date > gmoDate(now + DAY)) {
-    return reply(400, "bad request");
-  }
-  const ttl = date === gmoDate(now) ? 30 : 86400;
+// 取り次ぐ先と、許す引数（ほかは断る）
+async function relay(url, ttl, fetchImpl) {
   try {
-    const up = await fetchImpl(`${UPSTREAM}?symbol=${symbol}&interval=${interval}&date=${date}`, {
-      cf: { cacheTtl: ttl, cacheEverything: true },
-    });
+    const up = await fetchImpl(url, { cf: { cacheTtl: ttl, cacheEverything: true } });
     if (!up.ok) return reply(502, "upstream");
     const body = await up.text();
     if (body.length > MAX_BYTES) return reply(502, "upstream");
@@ -63,6 +48,35 @@ export async function handle(request, { now = Date.now(), fetchImpl = fetch } = 
   } catch {
     return reply(502, "upstream");
   }
+}
+
+export async function handle(request, { now = Date.now(), fetchImpl = fetch } = {}) {
+  if (request.method === "OPTIONS") {
+    return new Response(null, { status: 204, headers: headers({ "Access-Control-Allow-Methods": "GET", "Access-Control-Max-Age": "86400" }) });
+  }
+  if (request.method !== "GET") return reply(405, "method");
+  const url = new URL(request.url);
+  const q = url.searchParams;
+  const symbol = q.get("symbol");
+  if (url.pathname === "/klines") {
+    const interval = q.get("interval");
+    const date = q.get("date");
+    if ([...q.keys()].length !== 3 || !SYMBOLS.includes(symbol) || !INTERVALS.includes(interval)
+      || !/^\d{8}$/.test(date || "") || date < gmoDate(now - 7 * DAY) || date > gmoDate(now + DAY)) {
+      return reply(400, "bad request");
+    }
+    const ttl = date === gmoDate(now) ? 30 : 86400;
+    return relay(`${UPSTREAM}?symbol=${symbol}&interval=${interval}&date=${date}`, ttl, fetchImpl);
+  }
+  if (url.pathname === "/trades") {
+    // 最近の約定（ティック足）: page は 1〜10、count は 100 だけ（04 R-27）
+    const page = q.get("page");
+    if ([...q.keys()].length !== 3 || !SYMBOLS.includes(symbol) || !/^(?:[1-9]|10)$/.test(page || "") || q.get("count") !== "100") {
+      return reply(400, "bad request");
+    }
+    return relay(`${UPSTREAM_TRADES}?symbol=${symbol}&page=${page}&count=100`, 5, fetchImpl);
+  }
+  return reply(404, "not found");
 }
 
 export default { fetch: (request) => handle(request) };

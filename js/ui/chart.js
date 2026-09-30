@@ -40,6 +40,33 @@ function jstLabel(ms, { sec = false, date = false } = {}) {
   return date ? `${d.getUTCMonth() + 1}/${d.getUTCDate()} ${hm}` : hm;
 }
 
+const MARKERS_MAX = 100;
+
+// 約定の矢印（05・04 R-35 R-36）。純粋な関数: 約定を「約定の時刻以前に始まった最後の足」に置く。
+// 時間の足ならその約定を含む足、ティックなら直前の約定。足の範囲より前の約定は出さない。
+export function placeMarkers(fills, bars, inst, colors = { buy: "#1a9b5b", sell: "#d6454f" }) {
+  const mine = fills.filter((f) => f.inst === inst).slice(-MARKERS_MAX);
+  const out = [];
+  for (const f of mine) {
+    let lo = 0;
+    let hi = bars.length - 1;
+    let at = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1;
+      if (bars[mid].t <= f.time) { at = mid; lo = mid + 1; } else hi = mid - 1;
+    }
+    if (at < 0) continue;
+    const buy = f.side === "BUY";
+    const lev = f.market ? f.market === "lev" : inst.endsWith("_JPY");
+    let text = buy ? "買" : "売";
+    if (lev && f.intent === "open") text = buy ? "新買" : "新売";
+    else if (lev && f.intent === "close") text = "決済";
+    out.push({ time: bars[at].time, position: buy ? "belowBar" : "aboveBar", shape: buy ? "arrowUp" : "arrowDown",
+      color: buy ? colors.buy : colors.sell, text });
+  }
+  return out.sort((a, b) => a.time - b.time);
+}
+
 export class ChartView {
   constructor(app) {
     this.app = app;
@@ -58,6 +85,9 @@ export class ChartView {
     this.chart = null;
     this.key = "";
     this.xTime = new Map(); // ティックの横軸の番号 → 約定の時刻（ms）
+    this.lines = [];        // 建値の破線（[series, priceLine]）
+    this.markSig = "";
+    this.lineSig = "";
   }
 
   // 軸と十字線の時刻。ティックは横軸が通し番号なので、約定の時刻に引き直す（04 R-29）
@@ -79,7 +109,8 @@ export class ChartView {
       autoSize: true,
       layout: { background: { color: css("--panel") }, textColor: css("--muted"), attributionLogo: true },
       grid: { vertLines: { color: css("--line") }, horzLines: { color: css("--line") } },
-      timeScale: { timeVisible: true, secondsVisible: false, borderColor: css("--line"), tickMarkFormatter: (t) => this.label(t, false) },
+      // 右端に数本ぶんの余白（最新の足の上の矢印の文字が切れないように）
+      timeScale: { timeVisible: true, secondsVisible: false, borderColor: css("--line"), rightOffset: 6, tickMarkFormatter: (t) => this.label(t, false) },
       rightPriceScale: { borderColor: css("--line") },
       crosshair: { mode: 0 },
       // 端末の言語設定に左右されない（変わった言語タグで落ちるのを防ぐ）。値段は板と同じ桁区切り
@@ -119,6 +150,30 @@ export class ChartView {
     this.app.history.clear();
     this.hk = "";
     this.reset();
+  }
+
+  // 自分の約定の矢印と、持っている建玉の建値の破線。中身が変わったときだけ描き直す
+  drawTrades(inst, bars, main, other) {
+    const colors = { buy: css("--buy"), sell: css("--sell") };
+    const fills = this.app.fills || [];
+    const markSig = `${this.key}|${fills.length}|${bars.length}|${bars.length ? bars[bars.length - 1].time : ""}`;
+    if (markSig !== this.markSig) {
+      other.setMarkers([]);
+      main.setMarkers(placeMarkers(fills, bars, inst, colors));
+      this.markSig = markSig;
+    }
+    const acc = this.app.account;
+    const want = [];
+    const h = acc.s.spot[inst];
+    if (h && h.qty > 0) want.push({ price: h.cost / h.qty, color: colors.buy, title: "平均取得" });
+    for (const p of acc.s.lev) {
+      if (p.inst === inst) want.push({ price: p.entryPrice, color: p.side === "BUY" ? colors.buy : colors.sell, title: `建値 ${p.side === "BUY" ? "買" : "売"}` });
+    }
+    const lineSig = `${this.key}|${want.map((w) => `${w.title}@${w.price}`).join(",")}`;
+    if (lineSig === this.lineSig) return;
+    for (const [series, line] of this.lines) series.removePriceLine(line);
+    this.lines = want.map((w) => [main, main.createPriceLine({ price: w.price, color: w.color, lineWidth: 1, lineStyle: 2, axisLabelVisible: true, title: w.title })]);
+    this.lineSig = lineSig;
   }
 
   reset() {
@@ -180,6 +235,7 @@ export class ChartView {
       if (lastTime !== this.lastTime) ma();
       this.lastTime = lastTime;
     }
+    this.drawTrades(inst, bars, main, lineMode ? this.candle : this.line);
     const tick = isTick(this.frame);
     this.note.textContent = this.hist === "loading" ? (tick ? "過去の約定を読み込んでいます" : "過去の足を読み込んでいます")
       : this.hist === "fail" && bars.length < 20 ? (tick ? "過去の約定を取れませんでした（開いてからの約定で作ります）" : "過去の足を取れませんでした（開いてからの約定で作ります）")

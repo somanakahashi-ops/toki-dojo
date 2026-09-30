@@ -266,3 +266,16 @@ audit("レバの売りを一部ずつ決済（手数料のある SOL_JPY）", ({
   acc.place({ inst: "SOL_JPY", side: "BUY", type: "MARKET", size: 0.7, intent: "close", positionId: id });
   acc.step();
 });
+
+test("約定の記録に新規・決済（intent）と市場が入る（チャートの矢印の文字に使う）", () => {
+  const { acc, book } = setup({ cash: 100000 });
+  const fills = [];
+  const onEvent = acc.onEvent;
+  acc.onEvent = (e) => { if (e.fill) fills.push(e.fill); onEvent(e); };
+  book("XRP_JPY", 214, 215, 1000);
+  acc.place({ inst: "XRP_JPY", side: "SELL", type: "MARKET", size: 100, intent: "open" });
+  acc.step();
+  acc.place({ inst: "XRP_JPY", side: "BUY", type: "MARKET", size: 100, intent: "close", positionId: acc.s.lev[0].id });
+  acc.step();
+  assert.deepEqual(fills.map((f) => [f.market, f.intent, f.side]), [["lev", "open", "SELL"], ["lev", "close", "BUY"]]);
+});

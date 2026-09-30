@@ -116,6 +116,18 @@ await page.waitForSelector("text=BTC_JPY 買い", { timeout: 5000 });
 console.log("lev pos ok; margin:", await page.locator(".acct").innerText());
 await page.locator("button:has-text('決済')").first().click();
 await page.waitForTimeout(1500);
+// レバ: 新規売り → チャートに「新売」の矢印と「建値 売」の破線が出る → 決済
+await page.locator(".ticket .seg.buy-sell button.s").click();
+await page.fill("#size", "0.001");
+await page.waitForTimeout(400);
+await page.locator(".ticket button.btn.sell").click();
+await page.waitForSelector("text=BTC_JPY 売り", { timeout: 5000 });
+await page.waitForTimeout(1200);
+await page.evaluate(() => window.scrollTo(0, 0));
+await page.screenshot({ path: `${OUT}/short.png` });
+console.log("lev short opened; screenshot short.png");
+await page.locator("button:has-text('決済')").first().click();
+await page.waitForTimeout(1500);
 console.log("history:", (await page.locator("text=最近の注文").locator("xpath=following-sibling::*[1]").innerText()).replace(/\n/g, " | "));
 console.log("banner:", await page.locator(".banner").isVisible() ? await page.locator(".banner").textContent() : "(none)");
 await page.locator(".tabs button:has-text('振り返り')").click();

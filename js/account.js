@@ -303,7 +303,7 @@ export class Account {
     this.release(o, fraction);
     o.remaining = Math.max(0, o.remaining - size);
     if (o.remaining < spec.step / 2) o.remaining = 0;
-    const fill = { id: this.nextId("f"), orderId: o.id, inst: o.inst, side: o.side, size, price, fee, liquidity, time: t };
+    const fill = { id: this.nextId("f"), orderId: o.id, inst: o.inst, market: o.market, intent: o.intent, side: o.side, size, price, fee, liquidity, time: t };
     this.emit("fill", `約定しました（${this.label(o)} → ${size} @${round(price)}・手数料 ${fee}円）`, { fill });
     if (o.market === "spot") {
       if (o.side === "BUY") this.spotBuy(o.base, size, notional, fee, t);

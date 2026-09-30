@@ -1,6 +1,6 @@
 // 組み立て（03 §1）: 保存から読み込み → 相場・足・口座・配信をつなぐ → 画面を描く。
 import {
-  BASES, CAPITAL_CHOICES, CAPITAL_DEFAULT, GAP_MS, LATENCY_CHOICES, LATENCY_MS, MAX_INSTRUMENTS, hasLeverage, instKey,
+  BASES, CAPITAL_CHOICES, CAPITAL_DEFAULT, FILLS_MAX, GAP_MS, LATENCY_CHOICES, LATENCY_MS, MAX_INSTRUMENTS, hasLeverage, instKey,
 } from "./config.js";
 import { Account, newState } from "./account.js";
 import { Candles } from "./candles.js";
@@ -64,6 +64,7 @@ class App {
     this.candles = new Candles(this.store);
     this.history = new History();
     this.trades = [];
+    this.fills = []; // 約定（チャートに矢印を出すため。時刻順）
     this.dirty = false;
     this.renderQueued = false;
     this.lastRender = 0;
@@ -82,6 +83,7 @@ class App {
     await this.store.prune(Date.now());
     this.candles.load(await this.store.all("candles"), await this.store.all("quotes"));
     this.trades = (await this.store.all("trades")).sort((a, b) => a.exitTime - b.exitTime);
+    this.fills = (await this.store.all("fills")).sort((a, b) => a.time - b.time).slice(-FILLS_MAX);
     const saved = await this.store.get("account");
     const state = validState(saved) ? saved : newState(this.settings.capital, Date.now());
     this.account = new Account({
@@ -185,7 +187,11 @@ class App {
       this.trades.push(e.trade);
       this.store.add("trades", e.trade);
     }
-    if (e.type === "fill") this.store.add("fills", e.fill);
+    if (e.type === "fill") {
+      this.store.add("fills", e.fill);
+      this.fills.push(e.fill);
+      if (this.fills.length > FILLS_MAX) this.fills.splice(0, this.fills.length - FILLS_MAX);
+    }
     const kind = { fill: "fill", reject: "reject", cancel: "reject", liquidation: "reject", info: "info", accepted: "info" }[e.type];
     if (kind && e.message) this.toast(kind, e.message);
     this.render();
@@ -269,6 +275,7 @@ class App {
     if (!keepTrades) {
       await this.store.clear("trades");
       await this.store.clear("fills");
+      this.fills = [];
       this.trades = [];
     }
     this.save(true);

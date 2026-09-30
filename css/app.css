@@ -198,10 +198,12 @@ button { cursor: pointer; }
 .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
 .input {
   width: 100%;
+  min-width: 0;
   background: var(--panel-2);
   border: 1px solid var(--line);
   border-radius: var(--radius);
   padding: 8px;
+  font-size: 16px; /* 16px 未満だと iPhone が触ったときに拡大する（04 R-38） */
 }
 .input-unit { display: grid; grid-template-columns: 1fr auto; gap: 6px; }
 .est { font-size: 12px; color: var(--muted); display: grid; gap: 2px; }
@@ -219,6 +221,20 @@ button { cursor: pointer; }
 .btn:disabled { opacity: 0.45; cursor: not-allowed; }
 .confirm { border: 1px solid var(--accent); border-radius: var(--radius); padding: 8px; display: grid; gap: 6px; }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; }
+
+/* 建玉のカード（04 R-37）: 横に流れないよう縦に積む */
+.pos-list { display: grid; gap: 8px; }
+.pos-card { background: var(--panel-2); border: 1px solid var(--line); border-radius: var(--radius); padding: 10px; display: grid; gap: 10px; min-width: 0; }
+.pos-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; }
+.pos-head .title { font-weight: 700; font-size: 15px; }
+.pos-head .pnl { font-size: 20px; }
+.pos-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.pos-grid span, .pos-inputs span { display: block; font-size: 11px; color: var(--muted); margin-bottom: 2px; }
+.pos-grid b { font-size: 14px; overflow-wrap: anywhere; }
+.pos-inputs { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: end; }
+.pos-inputs .btn { padding: 10px 14px; }
+.btn.block { width: 100%; padding: 12px; font-weight: 700; }
+.pos-card .input { background: var(--panel); }
 
 /* 表 */
 .table-wrap { overflow-x: auto; }

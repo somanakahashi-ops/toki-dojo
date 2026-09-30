@@ -104,6 +104,7 @@ await page.waitForSelector("text=BTC 現物", { timeout: 5000 });
 console.log("spot holding row ok");
 await page.screenshot({ path: `${OUT}/spot.png`, fullPage: true });
 await page.locator("button:has-text('全部売る')").click();
+await page.locator("button:has-text('全部売る')").click();   // 2回押しで確定
 await page.waitForTimeout(1500);
 // レバ: 新規買い → 決済
 await page.locator(".topbar button:has-text('レバ')").click();
@@ -114,7 +115,8 @@ console.log("lev est:", await page.locator(".est").innerText());
 await page.locator(".ticket button.btn.buy").click();
 await page.waitForSelector("text=BTC_JPY 買い", { timeout: 5000 });
 console.log("lev pos ok; margin:", await page.locator(".acct").innerText());
-await page.locator("button:has-text('決済')").first().click();
+await page.locator(".pos-card button:has-text('決済')").first().click();
+await page.locator(".pos-card button:has-text('決済')").first().click();   // 2回押しで確定
 await page.waitForTimeout(1500);
 // レバ: 新規売り → チャートに「新売」の矢印と「建値 売」の破線が出る → 決済
 await page.locator(".ticket .seg.buy-sell button.s").click();
@@ -126,8 +128,41 @@ await page.waitForTimeout(1200);
 await page.evaluate(() => window.scrollTo(0, 0));
 await page.screenshot({ path: `${OUT}/short.png` });
 console.log("lev short opened; screenshot short.png");
-await page.locator("button:has-text('決済')").first().click();
+// 建玉のカード（04 R-37 R-38）: はみ出さない・入力欄16px以上・入力が描画をまたいで残る・反映で損切りが出る
+{
+  const over = await page.evaluate(() => {
+    const card = document.querySelector("#app .pos-card:last-child") || document.querySelector(".pos-card");
+    const r = card.getBoundingClientRect();
+    return [...card.querySelectorAll("*")].filter((e) => e.getBoundingClientRect().right > r.right + 1).map((e) => e.tagName + ":" + e.textContent.slice(0, 20));
+  });
+  console.log("card overflow:", JSON.stringify(over));
+  const input = page.locator(".pos-card input[aria-label='損切り（逆指値）']").first();
+  console.log("input font-size:", await input.evaluate((e) => getComputedStyle(e).fontSize));
+  const ask = await page.evaluate(() => Number(document.querySelector(".book-row.ask .px")?.textContent.replace(/,/g, "")) || 0);
+  const slPrice = String(Math.round(ask * 1.02));
+  await input.fill(slPrice);
+  await page.locator("h2:text-is('チャート')").click();   // 入力欄から離れる
+  await page.waitForTimeout(2000);
+  console.log("typed value survives renders:", (await input.inputValue()) === slPrice);
+  await page.locator(".pos-card button:has-text('反映')").first().click();
+  await page.waitForTimeout(800);
+  console.log("stop order listed:", await page.locator("td:text-is('損切り')").count() > 0);
+  await page.locator(".pos-card").last().scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${OUT}/poscard.png` });
+}
+await page.locator(".pos-card button:has-text('決済')").first().click();
+await page.locator(".pos-card button:has-text('決済')").first().click();   // 2回押しで確定
 await page.waitForTimeout(1500);
+{
+  const kept = await page.evaluate(async () => {
+    const w = [...document.querySelectorAll(".table-wrap")].find((x) => x.scrollWidth > x.clientWidth);
+    if (!w) return "no scrollable table";
+    w.scrollLeft = 40;
+    await new Promise((r) => setTimeout(r, 2000));
+    return w.scrollLeft > 0;
+  });
+  console.log("table scroll kept across renders:", kept);
+}
 console.log("history:", (await page.locator("text=最近の注文").locator("xpath=following-sibling::*[1]").innerText()).replace(/\n/g, " | "));
 console.log("banner:", await page.locator(".banner").isVisible() ? await page.locator(".banner").textContent() : "(none)");
 await page.locator(".tabs button:has-text('振り返り')").click();
